@@ -214,7 +214,7 @@ static int is_low_mem(void)
 
 static void sort_and_kill_tasks(struct selected_task selected[], int si)
 {
-	int i, j, max = si;
+	int max = si;
 
 	/*
 	 * We sort tasks based on (stime+utime) since last accessed,
