@@ -125,13 +125,13 @@ int selected_cmp(const void *a, const void *b)
 #ifdef CONFIG_ANDROID_PR_KILL
 int txpd_cmp(const void *a, const void *b)
 {
-	struct selected_task *x = ((struct selected_task *)a);
-	struct selected_task *y = ((struct selected_task *)b);
+	struct task_struct *x = *((struct task_struct **)a);
+	struct task_struct *y = *((struct task_struct **)b);
 
-	if (x->p->acct_timexpd < y->p->acct_timexpd)
+	if (x->acct_timexpd < y->acct_timexpd)
 		return 1;
 
-	if (x->p->acct_timexpd > y->p->acct_timexpd)
+	if (x->acct_timexpd > y->acct_timexpd)
 		return -1;
 
 	return 0;
@@ -212,19 +212,20 @@ static int is_low_mem(void)
 		return LOWMEM_NONE;
 }
 
-static void sort_and_kill_tasks(struct selected_task selected[], int si)
+static void sort_and_kill_tasks(struct task_struct *tasks_to_kill[], int tsi)
 {
-	int max = si;
+	int i, j, max = tsi;
 
 	/*
 	 * We sort tasks based on (stime+utime) since last accessed,
 	 * in descending order.
 	 */
-	sort(selected, si, sizeof(*selected), txpd_cmp, NULL);
+	sort(tasks_to_kill, tsi, sizeof(*tasks_to_kill),
+					txpd_cmp, NULL);
 
 	/* We kill tasks with the lowest (stime+utime) */
-	while (si--) {
-		struct task_struct *tsk = selected[si].p;
+	while (tsi--) {
+		struct task_struct *tsk = tasks_to_kill[tsi];
 
 		if (is_low_mem() == LOWMEM_NONE)
 			break;
@@ -235,7 +236,7 @@ static void sort_and_kill_tasks(struct selected_task selected[], int si)
 
 		pr_debug("process_reclaim: total:%d[%d] comm:%s(%d) txpd:%llu KILLED!",
 				max,
-				(si + 1),
+				(tsi + 1),
 				tsk->comm,
 				tsk->signal->oom_score_adj,
 				tsk->acct_timexpd);
@@ -255,6 +256,10 @@ static void swap_fn(struct work_struct *work)
 
 	/* Pick the best MAX_SWAP_TASKS tasks in terms of anon size */
 	struct selected_task selected[MAX_SWAP_TASKS] = {{0, 0, 0},};
+#ifdef CONFIG_ANDROID_PR_KILL
+	struct task_struct *tasks_to_kill[MAX_SWAP_TASKS];
+	int tsi = 0;
+#endif
 	int si = 0;
 	int i;
 	int tasksize;
@@ -342,8 +347,8 @@ static void swap_fn(struct work_struct *work)
 		if (is_low_mem() > LOWMEM_NONE &&
 			selected[si].oom_score_adj > score_kill_limit) {
 
-			sort_and_kill_tasks(selected, si);
-			break;
+			tasks_to_kill[tsi] = selected[si].p;
+			tsi += 1;
 
 		} else {
 #endif
@@ -369,6 +374,11 @@ static void swap_fn(struct work_struct *work)
 		}
 #endif
 	}
+
+#ifdef CONFIG_ANDROID_PR_KILL
+	if (tsi > 1)
+		sort_and_kill_tasks(tasks_to_kill, tsi);
+#endif
 
 	if (total_scan) {
 		efficiency = (total_reclaimed * 100) / total_scan;
